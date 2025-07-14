@@ -1,1 +1,1 @@
-untuk model chatbot Llama3 dan file venv tidak saya push karena ukurannya melebihi 2GB.
+untuk model chatbot Llama3 dan folder venv tidak saya push karena ukurannya melebihi 2GB.
