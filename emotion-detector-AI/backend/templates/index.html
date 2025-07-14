@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EmoChat - Chatbot Emosi</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='index.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>EmoChat AI</h1>
+        <p>Chatbot cerdas yang memahami emosi Anda melalui ekspresi wajah</p>
+        <a href="/detect" class="btn">Mulai Sekarang</a>
+    </div>
+
+    <script>
+        localStorage.removeItem('userEmotion');
+        
+        if (localStorage.getItem('userEmotion')) {
+            fetch('/reset', { method: 'GET' });
+        }
+    </script>
+
+
+    <style>
+        @keyframes bounceInFromBottom {
+        0% {
+            opacity: 0;
+            transform: translateY(100%);
+        }
+        60% {
+            opacity: 1;
+            transform: translateY(-20%);
+        }
+        80% {
+            transform: translateY(10%);
+        }
+        100% {
+            transform: translateY(0);
+        }
+        }
+
+        .container {
+        animation: bounceInFromBottom 1s ease;
+        }
+
+    </style>
+</body>
+</html>

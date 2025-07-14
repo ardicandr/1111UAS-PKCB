@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deteksi Emosi & Chat</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='detect.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="detection-section" id="detectionSection">
+            <h1>Deteksi Emosi Wajah</h1>
+            <video id="video" width="400" height="300" autoplay muted></video>
+            <div id="countdown">3</div>
+            <div id="status">Siapkan wajah Anda di depan kamera</div>
+            <button id="startBtn">Mulai Deteksi</button>
+        </div>
+
+        <div class="chat-section" id="chatSection">
+            <div id="emotionDisplay"></div>
+            <button id="detectAgainBtn">Deteksi Ulang Emosi</button>
+            <div id="chatbox"></div>
+            <div id="inputArea">
+                <input type="text" id="userInput" placeholder="Ketik pesan...">
+                <button id="sendBtn">Kirim</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const detectionSection = document.getElementById('detectionSection');
+        const chatSection = document.getElementById('chatSection');
+        const video = document.getElementById('video');
+        const countdownEl = document.getElementById('countdown');
+        const statusEl = document.getElementById('status');
+        const startBtn = document.getElementById('startBtn');
+        const chatbox = document.getElementById('chatbox');
+        const userInput = document.getElementById('userInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const emotionDisplay = document.getElementById('emotionDisplay');
+        const detectAgainBtn = document.getElementById('detectAgainBtn');
+
+        let countdown = 5;
+        let countdownInterval;
+        let userEmotion = localStorage.getItem('userEmotion');
+
+        function handleBeforeUnload() {
+            localStorage.removeItem('userEmotion');
+            navigator.sendBeacon('/reset');
+        }
+
+        function showDetectionSection() {
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+            detectionSection.style.display = 'block';
+            chatSection.style.display = 'none';
+            startCamera();
+        }
+
+        function showChatSection(emotion) {
+            window.addEventListener('beforeunload', handleBeforeUnload);
+            detectionSection.style.display = 'none';
+            chatSection.style.display = 'flex';
+            emotionDisplay.textContent = `Emosi saat ini: ${emotion}`;
+            getAutoResponse(emotion);
+        }
+
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 640 }, height: { ideal: 480 } }
+                });
+                video.srcObject = stream;
+            } catch (err) {
+                statusEl.textContent = 'Error: ' + err.message;
+            }
+        }
+
+        function stopCamera() {
+            if (video.srcObject) {
+                const tracks = video.srcObject.getTracks();
+                tracks.forEach(track => {
+                track.stop();
+                });
+                video.srcObject = null;
+            }
+        }
+
+        function captureImage() {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            return canvas.toDataURL('image/jpeg');
+        }
+
+        function startCountdown() {
+            countdown = 3;
+            countdownEl.textContent = countdown;
+            statusEl.textContent = 'Siapkan wajah Anda...';
+            startBtn.disabled = true;
+            
+            countdownInterval = setInterval(() => {
+                countdown--;
+                countdownEl.textContent = countdown;
+                
+                if (countdown <= 0) {
+                    clearInterval(countdownInterval);
+                    captureAndDetect();
+                }
+            }, 1000);
+        }
+
+        async function captureAndDetect() {
+            statusEl.textContent = 'Mendeteksi emosi... Mohon tunggu...';
+            const image = captureImage();
+
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: image })
+                });
+
+                const data = await response.json();
+                if (data.emotion && data.emotion !== "unknown") {
+                    userEmotion = data.emotion;
+                    localStorage.setItem('userEmotion', userEmotion);
+                    stopCamera();
+                    showChatSection(userEmotion);
+                } else {
+                    statusEl.textContent = '❗ Wajah tidak terdeteksi. Mengarahkan kembali...';
+                    statusEl.classList.add('error');
+                    stopCamera();
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 3000);
+                }
+            } catch (err) {
+                statusEl.textContent = 'Error: ' + err.message;
+                startBtn.disabled = false;
+            }
+        }
+
+
+        function getAutoResponse(emotion) {
+            const streamingDiv = document.createElement('div');
+            streamingDiv.classList.add('message', 'bot');
+            streamingDiv.innerHTML = '<div class="loading-dots"><span>.</span><span>.</span><span>.</span></div>';
+            chatbox.appendChild(streamingDiv);
+            scrollToBottom();
+            
+            const eventSource = new EventSource(`/stream-auto-chat?emotion=${encodeURIComponent(emotion)}`);
+            let fullResponse = '';
+            
+            eventSource.onmessage = (e) => {
+                if (e.data === '[DONE]') {
+                    eventSource.close();
+                    return;
+                }
+                
+                try {
+                    const data = JSON.parse(e.data);
+                    if (data.content) {
+                        fullResponse += data.content;
+                        streamingDiv.textContent = fullResponse;
+                        scrollToBottom();
+                    }
+                } catch (err) {
+                    console.error('Error parsing stream:', err);
+                }
+            };
+            
+            eventSource.onerror = () => {
+                streamingDiv.textContent = fullResponse || '[Koneksi ditutup]';
+                eventSource.close();
+            };
+        }
+
+        function sendMessage() {
+            const message = userInput.value.trim();
+            if (!message) return;
+            
+            addMessage(message, 'user');
+            userInput.value = '';
+            
+            const streamingDiv = document.createElement('div');
+            streamingDiv.classList.add('message', 'bot');
+            streamingDiv.innerHTML = '<div class="loading-dots"><span>.</span><span>.</span><span>.</span></div>';
+            chatbox.appendChild(streamingDiv);
+            scrollToBottom();
+            
+            const eventSource = new EventSource(
+                `/stream-chat?message=${encodeURIComponent(message)}&emotion=${encodeURIComponent(userEmotion || 'neutral')}`
+            );
+            let fullResponse = '';
+            
+            eventSource.onmessage = (e) => {
+                if (e.data === '[DONE]') {
+                    eventSource.close();
+                    return;
+                }
+                
+                try {
+                    const data = JSON.parse(e.data);
+                    if (data.content) {
+                        fullResponse += data.content;
+                        streamingDiv.textContent = fullResponse;
+                        scrollToBottom();
+                    }
+                } catch (err) {
+                    console.error('Error parsing stream:', err);
+                }
+            };
+            
+            eventSource.onerror = () => {
+                streamingDiv.textContent = fullResponse || '[Error koneksi]';
+                eventSource.close();
+            };
+        }
+
+        function addMessage(text, sender) {
+            const div = document.createElement('div');
+            div.classList.add('message', sender);
+            div.textContent = text;
+            chatbox.appendChild(div);
+            scrollToBottom();
+        }
+
+        function scrollToBottom() {
+            chatbox.scrollTop = chatbox.scrollHeight;
+        }
+
+        startBtn.addEventListener('click', startCountdown);
+        detectAgainBtn.addEventListener('click', () => {
+            resetDetection();
+            showDetectionSection();
+            });
+        sendBtn.addEventListener('click', sendMessage);
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        if (userEmotion) {
+            showChatSection(userEmotion);
+        } else {
+            showDetectionSection();
+        }
+
+        function resetDetection() {
+            if (countdownInterval) {
+                clearInterval(countdownInterval);
+                countdownInterval = null;
+            }
+            
+            stopCamera();
+            
+            countdownEl.textContent = "3";
+            statusEl.textContent = "Siapkan wajah Anda di depan kamera";
+            startBtn.disabled = false;
+            
+            localStorage.removeItem('userEmotion');
+            userEmotion = null;
+            
+            chatbox.innerHTML = '';
+        }
+    </script>
+</body>
+</html>
